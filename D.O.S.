@@ -1,0 +1,704 @@
+//YOU NEED TO MAKE SURE THAT THE STATED LIBRARIES BELOW ARE INSTALLED TO MAKE THIS SCRIPT FUNCTIONAL. YOU COULD FIND THEM ON GITHUB PRETTY EASILY. CREDITS TO ORIGINAL WRITER OF THESE LIBRARIES!.
+
+//Scripts by Yingnan Bao. Feel free to use them for open source purposes. Need caliboration and PID tunning before first filght. Follow law and regulations regarding drone uses.
+
+#include <Wire.h>
+#include "HMC5883Llib.h"
+#include <L3G4200D.h>
+#include <ADXL345.h>
+#include <PID_v1.h>
+#include <SPI.h>
+#include <nRF24L01.h>
+#include <RF24.h>
+#include <Kalman.h>
+#define CE_PIN   9
+#define CSN_PIN 10
+#include <Servo.h>
+
+//YOU NEED TO MAKE SURE THAT ABOVE LIBRARIES ARE INSTALLED TO HAVE THIS SCRIPT FUNCTIONAL. YOU COULD FIND THEM ON GITHUB PRETTY EASILY. CREDITS TO ORIGINAL WRITER OF THESE LIBRARIES!.
+
+
+Servo engine1;
+Servo engine2;
+Servo engine3;
+Servo engine4;
+Servo gimble1;
+Servo gimble2;
+double pos1 = 0;
+double pos2 = 0;
+
+double joystick_parameter1_roll = 0;
+double joystick_parameter2_pitch = 0;
+double joystick_parameter3_yaw = 0;
+double joystick_parameter4_throttle = 0;
+double joystick_parameter5_arm1 = 0;
+double joystick_parameter6_arm2 = 0;
+double joystick_parameter7_arm3 = 0;
+
+int SW1 = 0;
+
+double throttle = 0;
+double throttle_temp = 0;
+
+double engine1_parameter = 0;
+double engine2_parameter = 0;
+double engine3_parameter = 0;
+double engine4_parameter = 0;
+const uint64_t pipe = 0xE8E8F0F0E1LL;
+RF24 radio(CE_PIN, CSN_PIN);
+double joystick[8];  // 2 element array holding Joystick readings
+
+L3G4200D gyro;
+ADXL345 adxl;
+Magnetometer mag;
+bool fail;
+
+unsigned long t_last = 0;
+double dt = 0;
+
+double gyro_x = 0;
+double gyro_y = 0;
+double gyro_z = 0;
+double gyroangle_x = 0;
+double gyroangle_y = 0;
+double gyroangle_z = 0;
+double filtered_gyroangle_x = 0;
+double filtered_gyroangle_y = 0;
+double filtered_gyroangle_z = 0;
+double x_accel = 0;
+double y_accel = 0;
+double z_accel = 0;
+double x_gyro = 0;
+double y_gyro = 0;
+double z_gyro = 0;
+double base_x_gyro = 0;
+double base_y_gyro = 0;
+double base_z_gyro = 0;
+double base_x_accel = 0;
+double base_y_accel = 0;
+double base_z_accel = 0;
+double angle_z = 0;
+
+double throttle_cons = 0;
+
+
+double acc_angle_x = 0;
+double acc_angle_y = 0;
+double alpha = 0.95;
+
+double Est_x, angle_x, Output_x, NOutput_x;
+double Est_y, angle_y, Output_y, NOutput_y;
+
+double aKp=0.13, aKi=0.00, aKd=0.0;// aKP<0.1
+//double aKp=0.13, aKi=0.00, aKd=0.0;
+
+double Xfix=0, Yfix=0;
+
+double AngKp=1.8, AngKi=1.68, AngKd= 0.15;
+//double AngKp=2.00, AngKi=1.68, AngKd= 0.15;
+
+//double consKp=0, consKi=0, consKd=0;
+//double aggKp=0.4, aggKi=0.02, aggKd=0.1;
+//double consKp=0.1, consKi=0.005, consKd=0.025;
+
+double Angle_x, Angle_y;
+double Delta_x, Delta_y;
+double Output_Angular_x, Output_Angular_y;
+
+
+PID myPID_x(&Angle_x, &Output_x, &Est_x, aKp, aKi, aKd, DIRECT);
+PID myPID_y(&Angle_y, &Output_y, &Est_y, aKp, aKi, aKd, DIRECT);
+
+PID myPID_Angular_x(&Delta_x, &Output_Angular_x, &NOutput_x, AngKp, AngKi, AngKd, DIRECT);
+PID myPID_Angular_y(&Delta_y, &Output_Angular_y, &NOutput_y, AngKp, AngKi, AngKd, DIRECT);
+
+////YAW////
+
+double Est_YAW, Output_YAW;
+double YAWKp=0., YAWKi=0.0, YAWKd= 0.00;
+//double YAWKp=0.1, YAWKi=0.0, YAWKd= 0.03;
+PID myPID_YAW(&gyro_z, &Output_YAW, &Est_YAW, YAWKp, YAWKi, YAWKd, DIRECT);
+
+////YAW////
+
+
+Kalman kalmanX;
+Kalman kalmanY;  
+double kalAngleX, kalAngleY;
+////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void setup(){
+  Serial.begin(115200);
+  delay(1000);
+  Wire.begin();
+  gyro.initialize(2000);
+  adxl.powerOn();
+
+  //set activity/ inactivity thresholds (0-255)
+  adxl.setActivityThreshold(75); //62.5mg per increment
+  adxl.setInactivityThreshold(75); //62.5mg per increment
+  adxl.setTimeInactivity(10); // how many seconds of no activity is inactive?
+
+  //look of activity movement on this axes - 1 == on; 0 == off 
+  adxl.setActivityX(1);
+  adxl.setActivityY(1);
+  adxl.setActivityZ(1);
+
+  //look of inactivity movement on this axes - 1 == on; 0 == off
+  adxl.setInactivityX(1);
+  adxl.setInactivityY(1);
+  adxl.setInactivityZ(1);
+
+  //setting all interupts to take place on int pin 1
+  //I had issues with int pin 2, was unable to reset it
+  adxl.setInterruptMapping( ADXL345_INT_SINGLE_TAP_BIT,   ADXL345_INT1_PIN );
+  adxl.setInterruptMapping( ADXL345_INT_DOUBLE_TAP_BIT,   ADXL345_INT1_PIN );
+  adxl.setInterruptMapping( ADXL345_INT_FREE_FALL_BIT,    ADXL345_INT1_PIN );
+  adxl.setInterruptMapping( ADXL345_INT_ACTIVITY_BIT,     ADXL345_INT1_PIN );
+  adxl.setInterruptMapping( ADXL345_INT_INACTIVITY_BIT,   ADXL345_INT1_PIN );
+
+  //register interupt actions - 1 == on; 0 == off  
+  adxl.setInterrupt( ADXL345_INT_SINGLE_TAP_BIT, 1);
+  adxl.setInterrupt( ADXL345_INT_DOUBLE_TAP_BIT, 1);
+  adxl.setInterrupt( ADXL345_INT_FREE_FALL_BIT,  1);
+  adxl.setInterrupt( ADXL345_INT_ACTIVITY_BIT,   1);
+  adxl.setInterrupt( ADXL345_INT_INACTIVITY_BIT, 1);
+
+//  if (mag.begin() != 0)
+//  {
+//    Serial.println("Error connecting to Magnetometer");
+//    fail = true;
+//    return;
+//  }
+
+  // set the amount of gain - Use the most sensitive
+  // for reading the earths magnetic field
+  // 
+  // MSB/Gauss   Field Range
+  // 1370     +- 0.88 Ga
+  // 1090     +- 1.3 Ga
+  // 820      +- 1.9 Ga
+  // 660      +- 2.5 Ga
+  // 440      +- 4.0 Ga
+  // 390      +- 4.7 Ga
+  // 330      +- 5.6 Ga
+  // 230      +- 8.1 Ga
+  mag.setGain(HMC5833L_GAIN_1370);
+
+  //////////////////////////////////////rf24////////////////////////////////////////////////////
+  delay(1000);
+  //  Serial.println("Nrf24L01 Receiver Starting");
+  radio.begin();
+  radio.openReadingPipe(1,pipe);
+  radio.startListening();
+  //--(end setup )---
+  //////////////////////////////////////rf24////////////////////////////////////////////////////
+
+
+  /////////////////////////////////////////////sensor caliboration///////////////////////////////////////////////////////////
+ // Serial.println("Starting Calibration");
+//  for (int i = 0; i < 10; i++) {
+//    int acc_x,acc_y,acc_z;  
+//    adxl.readAccel(&acc_x, &acc_y, &acc_z); 
+//    byte interrupts = adxl.getInterruptSource();
+//    x_accel += acc_x;
+//    y_accel += acc_y;
+//    z_accel += acc_z;
+//    delay(10);
+//  }
+//  x_accel /= 10;
+//  y_accel /= 10;
+//  z_accel /= 10;
+
+  // Store the raw calibration values globally
+//  base_x_accel = x_accel;
+//  base_y_accel = y_accel;
+//  base_z_accel = z_accel;
+
+  /////////////////////////////////////////////sensor caliboration///////////////////////////////////////////////////////////
+
+
+  engine1.attach(8);
+  engine2.attach(7);
+  engine3.attach(6);
+  engine4.attach(5);
+
+  gimble1.attach(A0);
+  gimble2.attach(A1);
+
+  myPID_x.SetMode(AUTOMATIC);
+  myPID_y.SetMode(AUTOMATIC);
+  myPID_x.SetOutputLimits(-30, 30);
+  myPID_y.SetOutputLimits(-30, 30);
+
+
+  myPID_Angular_x.SetMode(AUTOMATIC);
+  myPID_Angular_y.SetMode(AUTOMATIC);
+  myPID_Angular_x.SetOutputLimits(-30, 30);
+  myPID_Angular_y.SetOutputLimits(-30, 30);
+
+////YAW////
+  myPID_YAW.SetMode(AUTOMATIC);
+  myPID_YAW.SetMode(AUTOMATIC);
+  myPID_YAW.SetOutputLimits(-30, 30);
+  myPID_YAW.SetOutputLimits(-30, 30);
+////YAW////
+
+  kalmanX.setAngle(angle_x);
+  kalmanY.setAngle(angle_y);
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void loop(){
+//  radio.startListening();
+  dt = millis() - t_last;// important1!!!! donot unable!!
+  t_last = millis();// important1!!!! donot unable!!
+  
+  dt = dt/1000;
+  
+  int acc_x,acc_y,acc_z;  
+  adxl.readAccel(&acc_x, &acc_y, &acc_z); 
+  byte interrupts = adxl.getInterruptSource();
+
+  acc_x = acc_x;// - base_x_accel;
+  acc_y = acc_y;// - base_y_accel;
+  acc_z = acc_z;
+
+  double acc_angle_x = atan(acc_y/sqrt(pow(acc_x,2) + pow(acc_z,2))) * 180 / 3.1415926 - 0.5;
+  double acc_angle_y = atan(-1 * acc_x/sqrt(pow(acc_y,2) + pow(acc_z,2))) * 180 / 3.1415926 + 2.15;
+
+
+  double angle_x = ( alpha * filtered_gyroangle_x ) + ( ( 1.0 - alpha ) * acc_angle_x );
+  double angle_y = ( alpha * filtered_gyroangle_y ) + ( ( 1.0 - alpha ) * acc_angle_y );
+  double angle_z = gyroangle_z;
+
+    //gyro read starts
+  gyro_x = gyro.getX()/14.5;
+  gyro_y = gyro.getY()/14.5;
+  gyro_z = gyro.getZ()/14.5;
+
+  //  gyroangle_x = gyroangle_x + (gyro_x * dt);
+  //  gyroangle_y = gyroangle_y + (gyro_y * dt);
+  //  gyroangle_z = gyroangle_z + (gyro_z * dt);
+
+  //gyro read ends
+  //acc read starts
+  
+
+  /////////////////////////////////data filtering/////////////////////////////////
+  filtered_gyroangle_x = angle_x + (gyro_x * dt);
+  filtered_gyroangle_y = angle_y + (gyro_y * dt);
+  filtered_gyroangle_z = angle_z + (gyro_z * dt);
+  /////////////////////////////////data filtering/////////////////////////////////  
+  //acc read ends
+  //magnetic field read starts
+  if (fail)
+    return;
+
+  double heading;
+
+  // reads the heading in degrees using the X and Y axis
+  int8_t ret = mag.readHeadingDeg(&heading);
+
+  switch (ret)
+  {
+  case HMC5833L_ERROR_GAINOVERFLOW:
+    //            Serial.println("Gain Overflow");
+    return;
+  case 0:
+    // success
+    break;
+  default:
+    //            Serial.println("Failed to read Magnetometer");
+    return;
+  }
+  //magnetic field read ends
+
+
+  ////////////////////////////////////RAW DATA COLLECTION ENDS////////////////////////////////////////
+
+
+
+  //////////////////////////////////////rf24////////////////////////////////////////////////////
+  if ( radio.available() )
+  {
+    bool done = false;
+    while (!done)
+    {
+      done = radio.read(joystick, sizeof(joystick) );
+      joystick[0] = 1023 - joystick[0];
+      joystick[3] = 1023 - joystick[3];
+    }
+  }
+  else
+  {    
+      Serial.println("No radio available");
+       joystick_parameter1_roll = 0;
+       joystick_parameter2_pitch = 0;     
+  }
+  
+  //////////////////////////////////////rf24////////////////////////////////////////////////////
+  //////////////////////////////////////joystick data map to servo////////////////////////////////////////////////////
+  joystick_parameter1_roll = joystick[0] - 10;
+  joystick_parameter2_pitch = joystick[1] + 27;
+  joystick_parameter3_yaw = joystick[2] + 14;
+  joystick_parameter4_throttle = joystick[3] - 22;
+
+  joystick_parameter5_arm1 = joystick[4];
+  joystick_parameter6_arm2 = joystick[5];
+  joystick_parameter7_arm3 = joystick[6];
+
+  SW1 = joystick[7];
+
+//  kp = joystick_parameter4_arm1;////////////////////////
+//  ki = joystick_parameter5_arm2;////////////////////////
+//  kd = 0.000;////////////////////////
+
+
+  joystick_parameter1_roll = map(joystick_parameter1_roll,0,1023,-10000,10000);
+  joystick_parameter1_roll = joystick_parameter1_roll / 1000;
+  
+  joystick_parameter2_pitch = map(joystick_parameter2_pitch,0,1023,-10000,10000);
+  joystick_parameter2_pitch = joystick_parameter2_pitch / 1000;
+  
+  joystick_parameter3_yaw = map(joystick_parameter3_yaw,0,1023,-30,30);
+  Est_YAW = joystick_parameter3_yaw;
+
+  
+  joystick_parameter4_throttle = map(joystick_parameter4_throttle,0,1023,-2000,2000);
+  joystick_parameter4_throttle = joystick_parameter4_throttle / 100;
+  throttle_temp = joystick_parameter4_throttle;
+
+  joystick_parameter7_arm3 = map(joystick_parameter7_arm3,0,1023,0,13000);
+  joystick_parameter7_arm3 = joystick_parameter7_arm3/100;
+
+
+//  aKp=map(joystick_parameter5_arm1,0,1023,0,2000);
+//  aKp = aKp/10000;
+//  AngKi=map(joystick_parameter5_arm1,0,1023,0,3000);
+//  AngKi = AngKi/1000;
+  AngKp=map(joystick_parameter5_arm1,0,1023,1000,3000);
+  AngKp = AngKp/1000;
+  AngKd=map(joystick_parameter6_arm2,0,1023,1000,5000);
+  AngKd = AngKd/10000;
+
+
+//  Xfix=map(joystick_parameter5_arm1,0,1023,-1000,1000);
+//  Xfix = Xfix/1000;
+//  Yfix=map(joystick_parameter6_arm2,0,1023,-1000,1000);
+//  Yfix = Yfix/1000;
+
+//
+//  if( AngKi < 0.05 ){
+//    AngKi = 0;} else{
+//      AngKi = AngKi;}
+
+  throttle_cons = joystick_parameter7_arm3;
+
+  //engine4_fix = joystick_parameter5_arm2;
+  // if( timer > 3 ){
+  //   timer = 0;
+  //   errSum_x = 0;
+  //   errSum_y = 0;
+  // } else {
+  //   timer = timer;
+  // }
+  /*Compute all the working error variables*/
+  /////////////////////////////////FILTER-X
+//  if(angle_x - last_angle_x > 10) {
+//    angle_x = last_angle_x + 5;
+//  } 
+//  else if(angle_x - last_angle_x < -10){
+//    angle_x = last_angle_x - 5;
+//  } 
+//  else {
+//    angle_x = angle_x;
+//  }
+  /////////////////////////////////FILTER-X
+  /////////////////////////////////FILTER-Y
+//  if(angle_y - last_angle_y > 10) {
+//    angle_y = last_angle_y + 5;
+//  } 
+//  else if(angle_y - last_angle_y < -10){
+//    angle_y = last_angle_y - 5;
+//  } 
+//  else {
+//    angle_y = angle_y;
+//  }
+
+
+
+
+
+
+
+
+
+//aggKp= (angle_y+1)/90 * 0.2 + 0.15;
+//consKp= (angle_y+1)/90 * 0.2 +0.15;
+
+
+
+
+
+  
+  
+Est_x = joystick_parameter1_roll;
+kalAngleX = kalmanX.getAngle(angle_x, gyro_x, dt);
+Delta_x = Angle_x - kalAngleX;
+Angle_x = kalAngleX + Xfix;
+  //////////////////////////////////////joystick data map to servo////////////////////////////////////////////////////
+  //////////////////////////////////////X-PID Calculation////////////////////////////////////////////////////    
+     myPID_x.SetTunings(aKp, aKi, aKd);
+     myPID_x.Compute();
+
+     NOutput_x = -Output_x;
+     //NOutput_x = -joystick_parameter1_roll;
+     
+     myPID_Angular_x.SetTunings(AngKp, AngKi, AngKd);
+     myPID_Angular_x.Compute();
+
+//if(Angle_x * Output_x >0){
+//  Output_x * 2;
+//}else{
+//  Output_x = Output_x;
+//}
+
+  
+  //////////////////////////////////////X-PID Calculation////////////////////////////////////////////////////    
+Est_y = joystick_parameter2_pitch;
+kalAngleY = kalmanY.getAngle(angle_y, gyro_y, dt);
+Delta_y = Angle_y - kalAngleY;
+Angle_y = kalAngleY + Yfix;
+
+
+  //////////////////////////////////////Y-PID Calculation////////////////////////////////////////////////////
+     myPID_y.SetTunings(aKp, aKi, aKd);
+     myPID_y.Compute();
+
+     NOutput_y = -Output_y;
+     //NOutput_y = -joystick_parameter2_pitch;
+
+     myPID_Angular_y.SetTunings(AngKp, AngKi, AngKd);
+     myPID_Angular_y.Compute();
+
+//if(Angle_y * Output_y >0){
+//  Output_y * 2;
+//}else{
+//  Output_y = Output_y;
+//}
+
+     
+ // Output_y = Output_y + (gyro_y / 30);
+  
+
+  //////////////////////////////////////Y-PID Calculation////////////////////////////////////////////////////   
+
+  //////////////////////////////////////YAW-PID Calculation////////////////////////////////////////////////////   
+
+     myPID_YAW.SetTunings(YAWKp, YAWKi, YAWKd);
+     myPID_YAW.Compute();
+
+  //////////////////////////////////////YAW-PID Calculation////////////////////////////////////////////////////
+  
+  throttle = throttle_cons + throttle_temp;
+
+ if ( throttle < 15){
+    throttle = 15;
+  } 
+  else {
+    throttle = throttle;
+  }
+
+  engine1_parameter = throttle + Output_Angular_y - Output_Angular_x - Output_YAW;
+  engine2_parameter = throttle + Output_Angular_y + Output_Angular_x + Output_YAW; 
+  engine3_parameter = throttle - Output_Angular_y + Output_Angular_x - Output_YAW;
+  engine4_parameter = throttle - Output_Angular_y - Output_Angular_x + Output_YAW;
+  if( engine1_parameter > 145 )  {   
+    engine1_parameter = 145;
+  } 
+    if( engine2_parameter > 145 )  {   
+    engine2_parameter = 145;
+  } 
+    if( engine3_parameter > 145 )  {   
+    engine3_parameter = 145;
+  } 
+    if( engine4_parameter > 145 )  {   
+    engine4_parameter = 145;
+  } 
+
+
+  if( SW1 == 1 )  {   
+    engine1_parameter = throttle;
+    engine2_parameter = throttle;
+    engine3_parameter = throttle;
+    engine4_parameter = throttle;
+  } 
+  else {
+    engine1_parameter = engine1_parameter;
+    engine2_parameter = engine2_parameter;
+    engine3_parameter = engine3_parameter;
+    engine4_parameter = engine4_parameter;
+  } 
+
+
+  engine1.write(engine1_parameter);
+  engine2.write(engine2_parameter);
+  engine3.write(engine3_parameter);
+  engine4.write(engine4_parameter);
+  pos1 = 90 - Angle_x;
+  pos2 = 90 + Angle_y; 
+  gimble1.write(pos1);
+  gimble2.write(pos2);
+//  radio.stopListening();
+
+
+  //////////////////////////////////////data display////////////////////////////////////////////////////     
+  //Serial.print(" YAWKp = ");    
+  //Serial.print(YAWKp,4);
+  Serial.print("akp = ");    
+  Serial.print(aKp,4);
+  Serial.print("Angkp = ");    
+  Serial.print(AngKp,4);
+  Serial.print("Angki = ");    
+  Serial.print(AngKi,4);
+  Serial.print("Angkd = ");    
+  Serial.print(AngKd,4);
+
+  Serial.print(">>X = ");    
+  Serial.print(Angle_x);
+//  Serial.print("Delta_x = ");      
+//  Serial.print(Delta_x);
+//  Serial.print("NOutput_x = ");      
+//  Serial.print(NOutput_x);
+//  Serial.print("Output_Angular_x = ");      
+//  Serial.print(Output_Angular_x);
+
+
+
+  Serial.print(">>Y = ");
+  Serial.print(Angle_y);
+//  Serial.print("Delta_y = ");      
+//  Serial.print(Delta_y);
+//  Serial.print("NOutput_y = ");      
+//  Serial.print(NOutput_y);
+//  Serial.print("Output_Angular_y = ");      
+ // Serial.print(Output_Angular_y);
+
+//  Serial.print("Output_YAW = ");      
+//  Serial.print(Output_YAW);
+  //      Serial.print(" gyro_Z:");
+  //      Serial.println(gyroangle_z);
+  //      Serial.print("gyroangle_Z:");
+  //      Serial.println(gyroangle_z);
+
+  //      Serial.print("Z =");
+  //      Serial.println(angle_z);
+//
+//        Serial.print(" J_X1 = ");
+//        Serial.print(joystick[0]);
+//        Serial.print(" J_Y1 = ");      
+//        Serial.print(joystick[1]);
+//        Serial.print(" J_X2 = ");      
+//        Serial.print(joystick[2]);
+//        Serial.print(" J_Y2 = ");      
+//        Serial.print(joystick[3]);
+//        Serial.print(" J_ARM1 = ");      
+//        Serial.print(joystick_parameter5_arm1);
+//        Serial.print(" J_ARM2 = ");      
+//        Serial.print(joystick_parameter6_arm2);
+//        Serial.print(" J_ARM3 = ");      
+//        Serial.print(joystick_parameter7_arm3);
+//        Serial.print(" J_SW1 = ");      
+//        Serial.print(SW1);
+//        
+//  Serial.print(" Roll Mapped = ");
+//  Serial.print(joystick_parameter1_roll);
+//  Serial.print(" Pitch Mapped = ");      
+//  Serial.print(joystick_parameter2_pitch);
+//Serial.print(" Yaw Mapped ");      
+//Serial.print(joystick_parameter3_yaw);
+Serial.print(" Output_YAW ");      
+Serial.print(Output_YAW);
+//Serial.print(" Throttle Mapped = ");   
+//Serial.print(joystick_parameter4_throttle);
+
+//  Serial.print(" SW1 = ");      
+//  Serial.print(joystick[6]);
+//  Serial.print(" SW2 = ");      
+//  Serial.print(joystick[7]);
+//  Serial.print(" kp = ");      
+//  Serial.print(kp);
+//  Serial.print("Output_x = ");      
+//  Serial.print(Output_x);
+
+
+
+  //      Serial.print("acc_X");
+  //      Serial.print(acc_x);
+  //      Serial.print("acc_Y");
+  //      Serial.print(acc_y);
+  //      Serial.print("acc_Z");
+  //      Serial.print(acc_z); 
+  //      Serial.print("dt=");
+  //      Serial.print(dt);
+  //      Serial.print("t_last=");
+  //      Serial.print(t_last);
+  //      Serial.print("t_now_=");    
+  //      Serial.print(t_now);
+
+  //      Serial.print("Heading: ");
+  //      Serial.println(heading);
+
+  //      Serial.print("error_x = ");
+  //      Serial.print(error_x);
+  //      Serial.print("ki * errSum_x = ");
+  //      Serial.print(ki * errSum_x);
+  //      Serial.print("kd * dErr_x = ");
+  //      Serial.print(kd * dErr_x);
+  //      Serial.print(" Output_x = ");
+  //      Serial.print(Output_x);
+//  Serial.print(" dt = ");
+//  Serial.print(dt*1000);
+//  Serial.print("error_y = ");
+//  Serial.print(error_y);
+//  Serial.print("ki * errSum_y = ");
+//  Serial.print(ki * errSum_y);
+//  Serial.print("kd * dErr_y = ");
+//  Serial.print(kd * dErr_y);
+//  Serial.print(" Output_y = ");
+//  Serial.print(Output_y);
+//Serial.print("gyro_z");
+//Serial.print(gyro_z);
+//  Serial.print("pos1 = ");
+//  Serial.print(pos1);
+//  Serial.print("pos2 = ");
+//  Serial.print(pos2);
+
+  Serial.print("EGN1 = ");
+  Serial.print(engine1_parameter);
+  Serial.print("EGN2 = ");
+  Serial.print(engine2_parameter);
+  Serial.print("EGN3 = ");
+  Serial.print(engine3_parameter);
+  Serial.print("EGN4 = ");
+  Serial.print(engine4_parameter);
+  Serial.print("throttle = ");
+  Serial.println(throttle);
+  //////////////////////////////////////data display////////////////////////////////////////////////////
+
+
+
+
+
+}
