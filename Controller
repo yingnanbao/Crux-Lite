@@ -1,0 +1,71 @@
+#include <SPI.h>
+#include <nRF24L01.h>
+#include <RF24.h>
+#define CE_PIN   9
+#define CSN_PIN 10
+
+#define JOYSTICK_X1 A0
+#define JOYSTICK_Y1 A1
+#define JOYSTICK_X2 A2
+#define JOYSTICK_Y2 A3
+
+#define JOYSTICK_ARM1 A5
+#define JOYSTICK_ARM2 A6
+#define JOYSTICK_ARM3 A7
+
+#define JOYSTICK_SW1 5
+
+int dt = 0;
+
+const uint64_t pipe = 0xE8E8F0F0E1LL; 
+
+
+
+RF24 radio(CE_PIN, CSN_PIN);
+
+double joystick[8];  // 2 element array holding Joystick readings
+
+void setup()
+{
+  Serial.begin(115200);
+  radio.begin();
+  radio.openWritingPipe(pipe);
+}//--(end setup )---
+
+
+void loop()
+{ dt = millis();
+  joystick[0] = analogRead(JOYSTICK_X1);
+  joystick[1] = analogRead(JOYSTICK_Y1);
+  joystick[2] = analogRead(JOYSTICK_X2);
+  joystick[3] = analogRead(JOYSTICK_Y2);
+  joystick[4] = analogRead(JOYSTICK_ARM1);
+  joystick[5] = analogRead(JOYSTICK_ARM2);
+  joystick[6] = analogRead(JOYSTICK_ARM3);
+  joystick[7] = digitalRead(JOYSTICK_SW1);
+  
+  radio.write( joystick, sizeof(joystick) );
+    
+  
+//    Serial.print("joystick X1 =");
+//    Serial.print(joystick[0]);
+//    Serial.print("joystick Y1 =");
+//    Serial.print(joystick[1]);
+//    Serial.print("joystick X2 =");
+//    Serial.print(joystick[2]);
+//    Serial.print("joystick Y2 =");
+//    Serial.print(joystick[3]);
+//    
+//    Serial.print("joystick ARM1 =");
+//    Serial.print(joystick[4]);
+//    Serial.print("joystick ARM2 =");
+//    Serial.print(joystick[5]);
+//    Serial.print("joystick ARM3 =");
+//    Serial.print(joystick[6]);
+//    
+//    Serial.print("joystick SW1 =");
+//    Serial.print(joystick[7]);
+
+    
+    dt = millis() - dt;
+}
