@@ -1,7 +1,3 @@
-//YOU NEED TO MAKE SURE THAT THE STATED LIBRARIES BELOW ARE INSTALLED TO MAKE THIS SCRIPT FUNCTIONAL. YOU COULD FIND THEM ON GITHUB PRETTY EASILY. CREDITS TO ORIGINAL WRITER OF THESE LIBRARIES!.
-
-//Scripts by Yingnan Bao. Feel free to use them for open source purposes. Need caliboration and PID tunning before first filght. Follow law and regulations regarding drone uses.
-
 #include <Wire.h>
 #include "HMC5883Llib.h"
 #include <L3G4200D.h>
@@ -11,26 +7,27 @@
 #include <nRF24L01.h>
 #include <RF24.h>
 #include <Kalman.h>
+/*-----( Declare Constants and Pin Numbers )-----*/
 #define CE_PIN   9
 #define CSN_PIN 10
+
 #include <Servo.h>
-
-//YOU NEED TO MAKE SURE THAT ABOVE LIBRARIES ARE INSTALLED TO HAVE THIS SCRIPT FUNCTIONAL. YOU COULD FIND THEM ON GITHUB PRETTY EASILY. CREDITS TO ORIGINAL WRITER OF THESE LIBRARIES!.
-
-
 Servo engine1;
 Servo engine2;
 Servo engine3;
 Servo engine4;
+
 Servo gimble1;
 Servo gimble2;
 double pos1 = 0;
 double pos2 = 0;
 
+
 double joystick_parameter1_roll = 0;
 double joystick_parameter2_pitch = 0;
 double joystick_parameter3_yaw = 0;
 double joystick_parameter4_throttle = 0;
+
 double joystick_parameter5_arm1 = 0;
 double joystick_parameter6_arm2 = 0;
 double joystick_parameter7_arm3 = 0;
@@ -44,9 +41,17 @@ double engine1_parameter = 0;
 double engine2_parameter = 0;
 double engine3_parameter = 0;
 double engine4_parameter = 0;
+// NOTE: the "LL" at the end of the constant is "LongLong" type
 const uint64_t pipe = 0xE8E8F0F0E1LL;
 RF24 radio(CE_PIN, CSN_PIN);
+
+/*-----( Declare Variables )-----*/
 double joystick[8];  // 2 element array holding Joystick readings
+
+//////////////////////////////////////rf24////////////////////////////////////////////////////
+
+
+//complete lib iclusion
 
 L3G4200D gyro;
 ADXL345 adxl;
@@ -86,6 +91,12 @@ double acc_angle_x = 0;
 double acc_angle_y = 0;
 double alpha = 0.95;
 
+//double kp = 0.00000;////////////////////////
+//double ki = 0.00000;////////////////////////
+//double kd = 0.00000;////////////////////////
+
+//int timer = 0;
+///////////////////////////////////pid//////////////////////////
 double Est_x, angle_x, Output_x, NOutput_x;
 double Est_y, angle_y, Output_y, NOutput_y;
 
@@ -94,7 +105,7 @@ double aKp=0.13, aKi=0.00, aKd=0.0;// aKP<0.1
 
 double Xfix=0, Yfix=0;
 
-double AngKp=1.8, AngKi=1.68, AngKd= 0.15;
+double AngKp=2.2, AngKi=0.23, AngKd= 0.28;
 //double AngKp=2.00, AngKi=1.68, AngKd= 0.15;
 
 //double consKp=0, consKi=0, consKd=0;
@@ -115,7 +126,7 @@ PID myPID_Angular_y(&Delta_y, &Output_Angular_y, &NOutput_y, AngKp, AngKi, AngKd
 ////YAW////
 
 double Est_YAW, Output_YAW;
-double YAWKp=0., YAWKi=0.0, YAWKd= 0.00;
+double YAWKp=0.1, YAWKi=0.0, YAWKd= 0.00;
 //double YAWKp=0.1, YAWKi=0.0, YAWKd= 0.03;
 PID myPID_YAW(&gyro_z, &Output_YAW, &Est_YAW, YAWKp, YAWKi, YAWKd, DIRECT);
 
@@ -169,12 +180,12 @@ void setup(){
   adxl.setInterrupt( ADXL345_INT_ACTIVITY_BIT,   1);
   adxl.setInterrupt( ADXL345_INT_INACTIVITY_BIT, 1);
 
-//  if (mag.begin() != 0)
-//  {
-//    Serial.println("Error connecting to Magnetometer");
-//    fail = true;
-//    return;
-//  }
+  if (mag.begin() != 0)
+  {
+    //        Serial.println("Error connecting to Magnetometer");
+    fail = true;
+    return;
+  }
 
   // set the amount of gain - Use the most sensitive
   // for reading the earths magnetic field
@@ -201,7 +212,10 @@ void setup(){
 
 
   /////////////////////////////////////////////sensor caliboration///////////////////////////////////////////////////////////
+
+
  // Serial.println("Starting Calibration");
+
 //  for (int i = 0; i < 10; i++) {
 //    int acc_x,acc_y,acc_z;  
 //    adxl.readAccel(&acc_x, &acc_y, &acc_z); 
@@ -215,6 +229,7 @@ void setup(){
 //  y_accel /= 10;
 //  z_accel /= 10;
 
+
   // Store the raw calibration values globally
 //  base_x_accel = x_accel;
 //  base_y_accel = y_accel;
@@ -227,6 +242,7 @@ void setup(){
   engine2.attach(7);
   engine3.attach(6);
   engine4.attach(5);
+
 
   gimble1.attach(A0);
   gimble2.attach(A1);
@@ -291,6 +307,7 @@ void loop(){
   //  gyroangle_y = gyroangle_y + (gyro_y * dt);
   //  gyroangle_z = gyroangle_z + (gyro_z * dt);
 
+
   //gyro read ends
   //acc read starts
   
@@ -332,9 +349,11 @@ void loop(){
   //////////////////////////////////////rf24////////////////////////////////////////////////////
   if ( radio.available() )
   {
+    // Read the data payload until we've received everything
     bool done = false;
     while (!done)
     {
+      // Fetch the data payload
       done = radio.read(joystick, sizeof(joystick) );
       joystick[0] = 1023 - joystick[0];
       joystick[3] = 1023 - joystick[3];
@@ -344,10 +363,28 @@ void loop(){
   {    
       Serial.println("No radio available");
        joystick_parameter1_roll = 0;
-       joystick_parameter2_pitch = 0;     
+       joystick_parameter2_pitch = 0;
+//      radio.startListening();
+//      Est_x = 0;
+//      Est_y = 0;
+//      Est_YAW = 0;
+      
   }
   
   //////////////////////////////////////rf24////////////////////////////////////////////////////
+
+
+  //kp = joystick[4];
+  //kp = kp / 1000.00;
+  //////////////////////////////////////self balancing////////////////////////////////////////////////////
+
+
+
+
+
+
+  //////////////////////////////////////self balancing////////////////////////////////////////////////////
+
   //////////////////////////////////////joystick data map to servo////////////////////////////////////////////////////
   joystick_parameter1_roll = joystick[0] - 10;
   joystick_parameter2_pitch = joystick[1] + 27;
@@ -387,11 +424,15 @@ void loop(){
 //  aKp = aKp/10000;
 //  AngKi=map(joystick_parameter5_arm1,0,1023,0,3000);
 //  AngKi = AngKi/1000;
-  AngKp=map(joystick_parameter5_arm1,0,1023,1000,3000);
-  AngKp = AngKp/1000;
-  AngKd=map(joystick_parameter6_arm2,0,1023,1000,5000);
-  AngKd = AngKd/10000;
+//  AngKp=map(joystick_parameter5_arm1,0,1023,0,3000);
+//  AngKp = AngKp/1000;
+//  AngKd=map(joystick_parameter6_arm2,0,1023,0000,5000);
+//  AngKd = AngKd/10000;
 
+//  YAWKp=map(joystick_parameter5_arm1,0,1023,0,3000);
+//  YAWKp = AngKi/1000;
+//  YAWKi=map(joystick_parameter5_arm1,0,1023,0,3000);
+//  YAWKi = AngKp/1000;
 
 //  Xfix=map(joystick_parameter5_arm1,0,1023,-1000,1000);
 //  Xfix = Xfix/1000;
@@ -449,7 +490,7 @@ void loop(){
 
 
 
-
+  /////////////////////////////////FILTER-X
 
   
   
@@ -474,14 +515,24 @@ Angle_x = kalAngleX + Xfix;
 //  Output_x = Output_x;
 //}
 
-  
+
+
+
+  //////////////////////////////////////X-PID Calculation////////////////////////////////////////////////////   
+
   //////////////////////////////////////X-PID Calculation////////////////////////////////////////////////////    
+  /*Compute all the working error variables*/
+
+
+
+
+
+
 Est_y = joystick_parameter2_pitch;
 kalAngleY = kalmanY.getAngle(angle_y, gyro_y, dt);
 Delta_y = Angle_y - kalAngleY;
 Angle_y = kalAngleY + Yfix;
-
-
+  //////////////////////////////////////joystick data map to servo////////////////////////////////////////////////////
   //////////////////////////////////////Y-PID Calculation////////////////////////////////////////////////////
      myPID_y.SetTunings(aKp, aKi, aKd);
      myPID_y.Compute();
@@ -536,6 +587,12 @@ Angle_y = kalAngleY + Yfix;
     if( engine4_parameter > 145 )  {   
     engine4_parameter = 145;
   } 
+
+//  engine1_parameter = throttle + Output_YAW;
+//  engine2_parameter = throttle - Output_YAW; 
+//  engine3_parameter = throttle + Output_YAW;
+//  engine4_parameter = throttle - Output_YAW;
+
 
 
   if( SW1 == 1 )  {   
@@ -595,8 +652,8 @@ Angle_y = kalAngleY + Yfix;
 //  Serial.print("Output_Angular_y = ");      
  // Serial.print(Output_Angular_y);
 
-//  Serial.print("Output_YAW = ");      
-//  Serial.print(Output_YAW);
+  Serial.print("gyro_z=");      
+  Serial.print(gyro_z);
   //      Serial.print(" gyro_Z:");
   //      Serial.println(gyroangle_z);
   //      Serial.print("gyroangle_Z:");
@@ -630,6 +687,8 @@ Angle_y = kalAngleY + Yfix;
 //Serial.print(joystick_parameter3_yaw);
 Serial.print(" Output_YAW ");      
 Serial.print(Output_YAW);
+Serial.print(" Est_YAW ");      
+Serial.println(Est_YAW);
 //Serial.print(" Throttle Mapped = ");   
 //Serial.print(joystick_parameter4_throttle);
 
@@ -685,16 +744,16 @@ Serial.print(Output_YAW);
 //  Serial.print("pos2 = ");
 //  Serial.print(pos2);
 
-  Serial.print("EGN1 = ");
-  Serial.print(engine1_parameter);
-  Serial.print("EGN2 = ");
-  Serial.print(engine2_parameter);
-  Serial.print("EGN3 = ");
-  Serial.print(engine3_parameter);
-  Serial.print("EGN4 = ");
-  Serial.print(engine4_parameter);
-  Serial.print("throttle = ");
-  Serial.println(throttle);
+//  Serial.print("EGN1 = ");
+//  Serial.print(engine1_parameter);
+//  Serial.print("EGN2 = ");
+//  Serial.print(engine2_parameter);
+//  Serial.print("EGN3 = ");
+//  Serial.print(engine3_parameter);
+//  Serial.print("EGN4 = ");
+//  Serial.print(engine4_parameter);
+//  Serial.print("throttle = ");
+//  Serial.println(throttle);
   //////////////////////////////////////data display////////////////////////////////////////////////////
 
 
