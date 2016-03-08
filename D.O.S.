@@ -59,6 +59,7 @@ Magnetometer mag;
 bool fail;
 
 unsigned long t_last = 0;
+unsigned long t_now = 0;
 double dt = 0;
 
 double gyro_x = 0;
@@ -105,7 +106,7 @@ double aKp=0.13, aKi=0.00, aKd=0.0;// aKP<0.1
 
 double Xfix=0, Yfix=0;
 
-double AngKp=2.2, AngKi=0.23, AngKd= 0.28;
+double AngKp=2.0, AngKi=0.15, AngKd= 0.28;
 //double AngKp=2.00, AngKi=1.68, AngKd= 0.15;
 
 //double consKp=0, consKi=0, consKd=0;
@@ -126,7 +127,7 @@ PID myPID_Angular_y(&Delta_y, &Output_Angular_y, &NOutput_y, AngKp, AngKi, AngKd
 ////YAW////
 
 double Est_YAW, Output_YAW;
-double YAWKp=0.1, YAWKi=0.0, YAWKd= 0.00;
+double YAWKp=0.1, YAWKi=0.1, YAWKd= 0.00;
 //double YAWKp=0.1, YAWKi=0.0, YAWKd= 0.03;
 PID myPID_YAW(&gyro_z, &Output_YAW, &Est_YAW, YAWKp, YAWKi, YAWKd, DIRECT);
 
@@ -277,11 +278,11 @@ void setup(){
 
 void loop(){
 //  radio.startListening();
-  dt = millis() - t_last;// important1!!!! donot unable!!
-  t_last = millis();// important1!!!! donot unable!!
-  
-  dt = dt/1000;
-  
+  dt = t_now - t_last;
+  t_last = millis();// important1!!!! donot unable!! 
+  dt = dt / 1000;
+
+
   int acc_x,acc_y,acc_z;  
   adxl.readAccel(&acc_x, &acc_y, &acc_z); 
   byte interrupts = adxl.getInterruptSource();
@@ -361,7 +362,7 @@ void loop(){
   }
   else
   {    
-      Serial.println("No radio available");
+//      Serial.println("No radio available");
        joystick_parameter1_roll = 0;
        joystick_parameter2_pitch = 0;
 //      radio.startListening();
@@ -617,21 +618,26 @@ Angle_y = kalAngleY + Yfix;
   pos2 = 90 + Angle_y; 
   gimble1.write(pos1);
   gimble2.write(pos2);
+
+  t_now = millis();
+  while(t_now - t_last < 12){
+    t_now = millis();
+  }
 //  radio.stopListening();
 
 
   //////////////////////////////////////data display////////////////////////////////////////////////////     
   //Serial.print(" YAWKp = ");    
   //Serial.print(YAWKp,4);
-  Serial.print("akp = ");    
-  Serial.print(aKp,4);
-  Serial.print("Angkp = ");    
-  Serial.print(AngKp,4);
-  Serial.print("Angki = ");    
-  Serial.print(AngKi,4);
-  Serial.print("Angkd = ");    
-  Serial.print(AngKd,4);
-
+//  Serial.print("akp = ");    
+//  Serial.print(aKp,4);
+//  Serial.print("Angkp = ");    
+//  Serial.print(AngKp,4);
+//  Serial.print("Angki = ");    
+//  Serial.print(AngKi,4);
+//  Serial.print("Angkd = ");    
+//  Serial.print(AngKd,4);
+//
   Serial.print(">>X = ");    
   Serial.print(Angle_x);
 //  Serial.print("Delta_x = ");      
@@ -642,9 +648,9 @@ Angle_y = kalAngleY + Yfix;
 //  Serial.print(Output_Angular_x);
 
 
-
-  Serial.print(">>Y = ");
-  Serial.print(Angle_y);
+//
+//  Serial.print(">>Y = ");
+//  Serial.print(Angle_y);
 //  Serial.print("Delta_y = ");      
 //  Serial.print(Delta_y);
 //  Serial.print("NOutput_y = ");      
@@ -652,8 +658,8 @@ Angle_y = kalAngleY + Yfix;
 //  Serial.print("Output_Angular_y = ");      
  // Serial.print(Output_Angular_y);
 
-  Serial.print("gyro_z=");      
-  Serial.print(gyro_z);
+//  Serial.print("gyro_z=");      
+//  Serial.print(gyro_z);
   //      Serial.print(" gyro_Z:");
   //      Serial.println(gyroangle_z);
   //      Serial.print("gyroangle_Z:");
@@ -685,10 +691,10 @@ Angle_y = kalAngleY + Yfix;
 //  Serial.print(joystick_parameter2_pitch);
 //Serial.print(" Yaw Mapped ");      
 //Serial.print(joystick_parameter3_yaw);
-Serial.print(" Output_YAW ");      
-Serial.print(Output_YAW);
-Serial.print(" Est_YAW ");      
-Serial.println(Est_YAW);
+//Serial.print(" Output_YAW ");      
+//Serial.print(Output_YAW);
+//Serial.print(" Est_YAW ");      
+//Serial.print(Est_YAW);
 //Serial.print(" Throttle Mapped = ");   
 //Serial.print(joystick_parameter4_throttle);
 
@@ -709,8 +715,8 @@ Serial.println(Est_YAW);
   //      Serial.print(acc_y);
   //      Serial.print("acc_Z");
   //      Serial.print(acc_z); 
-  //      Serial.print("dt=");
-  //      Serial.print(dt);
+//      Serial.print("dt=");
+//      Serial.print(dt);
   //      Serial.print("t_last=");
   //      Serial.print(t_last);
   //      Serial.print("t_now_=");    
@@ -728,7 +734,7 @@ Serial.println(Est_YAW);
   //      Serial.print(" Output_x = ");
   //      Serial.print(Output_x);
 //  Serial.print(" dt = ");
-//  Serial.print(dt*1000);
+//  Serial.println(dt*1000);
 //  Serial.print("error_y = ");
 //  Serial.print(error_y);
 //  Serial.print("ki * errSum_y = ");
@@ -744,20 +750,17 @@ Serial.println(Est_YAW);
 //  Serial.print("pos2 = ");
 //  Serial.print(pos2);
 
-//  Serial.print("EGN1 = ");
-//  Serial.print(engine1_parameter);
-//  Serial.print("EGN2 = ");
-//  Serial.print(engine2_parameter);
-//  Serial.print("EGN3 = ");
-//  Serial.print(engine3_parameter);
-//  Serial.print("EGN4 = ");
-//  Serial.print(engine4_parameter);
+  Serial.print(t_now - t_last);
+
+  Serial.print("EGN1 = ");
+  Serial.print(engine1_parameter);
+  Serial.print("EGN2 = ");
+  Serial.print(engine2_parameter);
+  Serial.print("EGN3 = ");
+  Serial.print(engine3_parameter);
+  Serial.print("EGN4 = ");
+  Serial.println(engine4_parameter);
 //  Serial.print("throttle = ");
 //  Serial.println(throttle);
   //////////////////////////////////////data display////////////////////////////////////////////////////
-
-
-
-
-
-}
+  }
